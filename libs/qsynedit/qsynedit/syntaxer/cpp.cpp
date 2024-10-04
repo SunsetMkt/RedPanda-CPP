@@ -16,6 +16,7 @@
  */
 #include "cpp.h"
 #include "../constants.h"
+#include "qt_utils/utils.h"
 
 #include <QFont>
 #include <QDebug>
@@ -1069,7 +1070,7 @@ void CppSyntaxer::procSpace()
 {
     mRun += 1;
     mTokenId = TokenId::Space;
-    while (mRun<mLineSize && mLine[mRun]>=1 && mLine[mRun]<=32)
+    while (mRun < mLineSize && isLexicalSpace(mLine[mRun]))
         mRun+=1;
     if (mRun>=mLineSize) {
         mRange.hasTrailingSpaces = true;
@@ -1625,6 +1626,14 @@ void CppSyntaxer::next()
             } else if (mRun+1<mLineSize && mLine[mRun] == 'R' && mLine[mRun+1] == '"') {
                 //qDebug()<<"*c-0-0*";
                 mRun+=2;
+                mRange.state = RangeState::rsRawString;
+                procRawString();
+            } else if (mRun+2<mLineSize && (mLine[mRun] == 'L' || mLine[mRun] == 'u' || mLine[mRun]=='U')  && mLine[mRun+1] == 'R' && mLine[mRun+2]=='\"') {
+                mRun+=3;
+                mRange.state = RangeState::rsRawString;
+                procRawString();
+            } else if (mRun+3<mLineSize && mLine[mRun] == 'u' && mLine[mRun+1] == '8' && mLine[mRun+2] == 'R' && mLine[mRun+3]=='\"') {
+                mRun+=4;
                 mRange.state = RangeState::rsRawString;
                 procRawString();
             } else if (mRun+1<mLineSize && (mLine[mRun] == 'L' || mLine[mRun] == 'u' || mLine[mRun]=='U') && mLine[mRun+1]=='\"') {

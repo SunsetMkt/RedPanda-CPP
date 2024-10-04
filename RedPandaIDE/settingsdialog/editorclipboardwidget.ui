@@ -79,6 +79,20 @@
        </widget>
       </item>
       <item>
+       <widget class="QCheckBox" name="chkCopyHTMLWithLineNumber">
+        <property name="text">
+         <string>Copy with line number</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="chkCopyHTMLRecalcLineNumber">
+        <property name="text">
+         <string>Recalc line number</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QWidget" name="widget_3" native="true">
         <layout class="QHBoxLayout" name="horizontalLayout_2">
          <property name="leftMargin">

@@ -17,7 +17,6 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QMessageBox>
-#include <QTextCodec>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -45,6 +44,7 @@
 #include <QUuid>
 #include <QScrollBar>
 #include <QTextDocumentFragment>
+#include <QActionGroup>
 
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
@@ -106,11 +106,6 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-
-static const char *Translation[] =
-{
-  QT_TRANSLATE_NOOP("QFileSystemModel", "<b>The name \"%1\" cannot be used.</b><p>Try using another name, with fewer characters or no punctuation marks.")
-};
 
 static int findTabIndex(QTabWidget* tabWidget , QWidget* w) {
     for (int i=0;i<tabWidget->count();i++) {
@@ -1163,6 +1158,7 @@ void MainWindow::setActiveBreakpoint(QString fileName, int Line, bool setFocus)
     Editor *e = openFile(fileName, false);
     if (e!=nullptr) {
         e->setActiveBreakpointFocus(Line,setFocus);
+        e->activate(false);
         if (setFocus) {
             activateWindow();
         }
@@ -1733,7 +1729,7 @@ Editor* MainWindow::openFile(QString filename, bool activate, QTabWidget* page)
         }
         bool inProject = (mProject && unit);
         QByteArray encoding = unit ? unit->encoding() :
-                                     (pSettings->editor().autoDetectFileEncoding()? ENCODING_AUTO_DETECT : pSettings->editor().defaultEncoding());
+                                     (pSettings->editor().autoDetectFileEncoding() ? QByteArray(ENCODING_AUTO_DETECT) : pSettings->editor().defaultEncoding());
         Project * pProject = (inProject?mProject.get():nullptr);
         if (pProject && encoding==ENCODING_PROJECT)
             encoding=pProject->options().encoding;
@@ -3449,7 +3445,7 @@ void MainWindow::loadLastOpens()
         }
         bool inProject = (mProject && unit);
         QByteArray encoding = unit ? unit->encoding() :
-                                     (pSettings->editor().autoDetectFileEncoding()? ENCODING_AUTO_DETECT : pSettings->editor().defaultEncoding());
+                                     (pSettings->editor().autoDetectFileEncoding()? QByteArray(ENCODING_AUTO_DETECT) : pSettings->editor().defaultEncoding());
         Project* pProject = (inProject?mProject.get():nullptr);
         if (pProject && encoding==ENCODING_PROJECT)
             encoding=pProject->options().encoding;
@@ -6349,7 +6345,7 @@ void MainWindow::on_actionConvert_to_ANSI_triggered()
         return;
     if (QMessageBox::warning(this,tr("Confirm Convertion"),
                    tr("The editing file will be saved using %1 encoding. <br />This operation can't be reverted. <br />Are you sure to continue?")
-                   .arg(QString(QTextCodec::codecForLocale()->name())),
+                   .arg(QString(TextEncoder::encoderForSystem().name())),
                    QMessageBox::Yes, QMessageBox::No)!=QMessageBox::Yes)
         return;
     editor->convertToEncoding(ENCODING_SYSTEM_DEFAULT);

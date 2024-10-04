@@ -1,9 +1,20 @@
 Red Panda C++ Version 3.2
 
-  - Change: The way to calcuate astyle path.
+  - change: The way to calcuate astyle path.
   - fix: Scroll bar arrow size not correct in the dark themes.
   - fix: Don't auto scroll to the caret after undo/redo.
   - fix: "bits/stdc++" is not openned in readonly mode.
+  - fix: astyle path error when reformat.
+  - fix: Slow when paste/replace bulk contents.
+  - fix: Crash in windows 7. (by CyanoHao)
+  - fix: While Control is pressed, can't start Drag&Drop by mouse.
+  - enhancement: Auto detect gdb ACP (by CyanoHao)
+  - fix:  When debugging project, the executing source file is not auto switched to. （#476）
+  - enhancement: Support Raw string literal with LR/UR/uR/u8R prefix.
+  - change: Copy/Export as html using less restrictive header.
+  - enhancement: Better gcc info detection (by CyanoHao)
+  - enhancement: Copy/Export as html with line numbers.
+
 
 Red Panda C++ Version 3.1
 

@@ -18,7 +18,6 @@
 
 #include <QtCore/QFileInfo>
 #include <QFont>
-#include <QTextCodec>
 #include <QVariant>
 #include <QWheelEvent>
 #include <QGuiApplication>
@@ -30,7 +29,6 @@
 #include <QPrinter>
 #include <QPrintDialog>
 #include <QTextDocument>
-#include <QTextCodec>
 #include <QScrollBar>
 #include <QScreen>
 #include <memory>
@@ -610,11 +608,12 @@ void Editor::setFilename(const QString &newName)
     return;
 }
 
-void Editor::activate()
+void Editor::activate(bool focus)
 {
     if (mParentPageControl)
         mParentPageControl->setCurrentWidget(this);
-    setFocus();
+    if (focus)
+        setFocus();
 }
 
 const QByteArray& Editor::encodingOption() const noexcept{
@@ -1185,7 +1184,6 @@ void Editor::mouseMoveEvent(QMouseEvent *event)
         }
         return;
     }
-
     QSynedit::QSynEdit::mouseMoveEvent(event);
 }
 
@@ -1487,23 +1485,21 @@ void Editor::mouseReleaseEvent(QMouseEvent *event)
     // if ctrl+clicked
     if ((event->modifiers() == Qt::ControlModifier)
             && (event->button() == Qt::LeftButton)) {
-        if (!selAvail() ) {
-            QSynedit::BufferCoord p;
-            if (mParser && pointToCharLine(event->pos(),p)) {
-                cancelHoverLink();
-                QString sLine = lineText(p.line);
-                if (mParser->isIncludeNextLine(sLine)) {
-                    QString filename = mParser->getHeaderFileName(mFilename,sLine, true);
-                    pMainWindow->openFile(filename);
-                    return;
-                } if (mParser->isIncludeLine(sLine)) {
-                    QString filename = mParser->getHeaderFileName(mFilename,sLine);
-                    pMainWindow->openFile(filename);
-                    return;
-                } else if (mParser->enabled()) {
-                    gotoDefinition(p);
-                    return;
-                }
+        QSynedit::BufferCoord p;
+        if (mParser && pointToCharLine(event->pos(),p)) {
+            cancelHoverLink();
+            QString sLine = lineText(p.line);
+            if (mParser->isIncludeNextLine(sLine)) {
+                QString filename = mParser->getHeaderFileName(mFilename,sLine, true);
+                pMainWindow->openFile(filename);
+                return;
+            } if (mParser->isIncludeLine(sLine)) {
+                QString filename = mParser->getHeaderFileName(mFilename,sLine);
+                pMainWindow->openFile(filename);
+                return;
+            } else if (mParser->enabled()) {
+                gotoDefinition(p);
+                return;
             }
         }
     }
@@ -1688,6 +1684,13 @@ void Editor::copyAsHTML()
                                         ));
     exporter.setCreateHTMLFragment(true);
 
+    if (pSettings->editor().copyHTMLWithLineNumber()) {
+        exporter.setExportLineNumber(true);
+        exporter.setRecalcLineNumber(pSettings->editor().copyHTMLRecalcLineNumber());
+        exporter.setLineNumberStartFromZero(pSettings->editor().gutterLineNumbersStartZero());
+        exporter.setLineNumberColor(gutter().textColor());
+        exporter.setLineNumberBackgroundColor(gutter().color());
+    }
     exporter.exportRange(document(),blockBegin(),blockEnd());
 
     //clipboard takes the owner ship
@@ -3455,6 +3458,13 @@ void Editor::exportAsHTML(const QString &htmlFilename)
                                         std::placeholders::_4,
                                         std::placeholders::_5
                                         ));
+    if (pSettings->editor().copyHTMLWithLineNumber()) {
+        exporter.setExportLineNumber(true);
+        exporter.setRecalcLineNumber(false);
+        exporter.setLineNumberStartFromZero(pSettings->editor().gutterLineNumbersStartZero());
+        exporter.setLineNumberColor(gutter().textColor());
+        exporter.setLineNumberBackgroundColor(gutter().color());
+    }
     exporter.exportAll(document());
     exporter.saveToFile(htmlFilename);
 }
@@ -4233,7 +4243,7 @@ void Editor::updateFunctionTip(bool showTip)
         return;
 
     QChar ch=lastNonSpaceChar(currentLine,currentChar);
-    if (ch!="(" && ch!=",")
+    if (ch!='(' && ch!=',')
         return;
 
     QSynedit::PTokenAttribute attr;
@@ -4616,16 +4626,6 @@ bool Editor::canAutoSave() const
 void Editor::setCanAutoSave(bool newCanAutoSave)
 {
     mCanAutoSave = newCanAutoSave;
-}
-
-void Editor::mousePressEvent(QMouseEvent *event)
-{
-    if ((event->modifiers() == Qt::ControlModifier)
-            && (event->button() == Qt::LeftButton)) {
-        event->accept();
-        return;
-    }
-    QSynedit::QSynEdit::mousePressEvent(event);
 }
 
 const QDateTime &Editor::hideTime() const

@@ -1,6 +1,6 @@
 ﻿# 通用开发说明
 
-小熊猫C++ 需要 Qt 5.15。
+小熊猫C++ 需要 Qt 5.15 或 6.7+。
 
 推荐开发环境：
 1. Visual Studio Code。
@@ -35,7 +35,7 @@
 
 ## MSYS2 的 Qt 库 + MinGW 工具链（推荐）
 
-小熊猫C++ 应该能在 MSYS2 的 MinGW 工具链上构建，包括 3 个基于 GNU 的环境（MINGW32、MINGW64、UCRT64）中的 GCC 和 Clang，以及 3 个基于 LLVM 的环境（CLANG32、CLANG64、CLANGARM64）中的 Clang，关于环境的详情可参考 [MSYS2 的文档](https://www.msys2.org/docs/environments/)。以下几个工具链测试较充分：
+小熊猫C++ 应该能在 MSYS2 的 MinGW 工具链上构建，包括 3 个基于 GNU 的环境（MINGW32、MINGW64、UCRT64）中的 GCC 和 Clang，以及基于 LLVM 的 64 位环境（CLANG64、CLANGARM64）中的 Clang，关于环境的详情可参考 [MSYS2 的文档](https://www.msys2.org/docs/environments/)。以下几个工具链测试较充分：
 - MINGW32 GCC，
 - MINGW64 GCC，
 - UCRT64 GCC（x64 推荐），
@@ -47,11 +47,19 @@
 
 0. Windows 10 x64 或更高版本，或 Windows 11 ARM64。
 1. 安装 MSYS2。
-2. 在所选环境中安装工具链、Qt 5 库、其他所需工具：
+2. 在所选环境中安装工具链、Qt 5 库、其他所需工具，64 位：
    ```bash
    pacman -S \
-     $MINGW_PACKAGE_PREFIX-{toolchain,qt5-static,7zip,cmake} \
+     $MINGW_PACKAGE_PREFIX-{cc,make,qt5-static,7zip,cmake} \
      mingw-w64-i686-nsis \
+     git curl
+   ```
+   32 位：
+   ```bash
+   pacman -S \
+     $MINGW_PACKAGE_PREFIX-{cc,make,qt5-static,cmake} \
+     mingw-w64-i686-nsis \
+     mingw-w64-x86_64-7zip \
      git curl
    ```
 
@@ -81,60 +89,27 @@
 
 `build-xp.sh` 脚本和 `build-mingw.sh` 类似，但是工具链由 Qt 库提供。
 
-前置条件：
+本机构建前置条件：
 
 0. Windows 10 x64 或更高版本。
 1. 安装 MSYS2。
-2. 安装所需工具：
-   ```bash
-   pacman -S \
-     mingw-w64-x86_64-{7zip,cmake} \
-     mingw-w64-i686-nsis \
-     git curl
-   ```
-3. 下载 [Windows XP 的 Qt 库](https://github.com/redpanda-cpp/qtbase-xp)并解压到 `C:/Qt`。
-   - 目录结构应该如下：
-     ```
-     C:
-     └─ Qt
-        └─ 5.15.13+redpanda1
-           ├─ mingw141_32-msvcrt
-           │  ├─ bin
-           │  │  ├─ gcc.exe
-           │  │  ├─ mingw32-make.exe
-           │  │  └─ qmake.exe
-           │  ├─ include
-           │  ├─ lib
-           │  └─ ...
-           └─ mingw141_64-msvcrt
-              ├─ bin
-              │  ├─ gcc.exe
-              │  ├─ mingw32-make.exe
-              │  └─ qmake.exe
-              ├─ include
-              ├─ lib
-              └─ ...
-     ```
-   - 也可以从源代码自行构建 Qt 并在构建时指定 `--qt` 参数。
 
-要构建此项目，启动 MSYS2 环境，然后运行
+要进行本机构建，启动 MSYS2 环境，然后运行
 ```bash
 ./packages/msys/build-xp.sh -p 32-msvcrt
 ```
 
-此脚本除了接受 `build-mingw.sh` 的参数外，还接受以下参数：
-- `-p|--profile <profile>`：（必需）MinGW Lite 和 Qt 库的编译配置。可用的配置有 `64-ucrt`、`32-ucrt`、`64-msvcrt`、`32-msvcrt`、`32-win2000`。
-- `--qt <dir>`：指定 Qt 库目录。例如 `--qt /d/myqt-32`。
+要进行交叉构建，运行
+```bash
+podman run -it --rm -v $PWD:/mnt -w /mnt docker.io/amd64/ubuntu:24.04
 
-  目录结构应该如下：
-  ```
-  D:
-  └─ myqt-32
-     ├─ bin
-     ├─ include
-     ├─ lib
-     └─ ...
-  ```
+# 在容器内
+export MIRROR=mirrors.ustc.edu.cn  # 根据需要设置镜像站
+./packages/xmingw/build-xp.sh -p 32-msvcrt
+```
+
+此脚本除了接受 `build-mingw.sh` 的参数外，还接受以下参数：
+- `-p|--profile <profile>`：（必需）MinGW Lite 和 Qt 库的编译配置。可用的配置有 `64-ucrt`、`32-ucrt`、`64-msvcrt`、`32-msvcrt`。
 
 # Linux
 

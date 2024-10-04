@@ -16,24 +16,28 @@
  */
 #include "exporter.h"
 #include "../document.h"
+#include "qdebug.h"
 #include <QClipboard>
 #include <QFile>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QPalette>
-#include <QTextCodec>
+#include <qt_utils/utils.h>
 
 namespace QSynedit {
 
 Exporter::Exporter(int tabSize, const QByteArray charset):
-    mTabSize(tabSize),
-    mCharset(charset)
+    mTabSize{tabSize},
+    mCharset{charset},
+    mFont{QGuiApplication::font()},
+    mBackgroundColor{QGuiApplication::palette().color(QPalette::Base)},
+    mForegroundColor{QGuiApplication::palette().color(QPalette::Text)},
+    mUseBackground{false},
+    mFileEndingType{NewlineType::Windows},
+    mExportLineNumber(false),
+    mRecalcLineNumber(true),
+    mLineNumberStartFromZero(false)
 {
-    mFont = QGuiApplication::font();
-    mBackgroundColor = QGuiApplication::palette().color(QPalette::Base);
-    mForegroundColor = QGuiApplication::palette().color(QPalette::Text);
-    mUseBackground = false;
-    mFileEndingType = NewlineType::Windows;
     clear();
     setTitle("");
 }
@@ -69,11 +73,18 @@ void Exporter::exportRange(const PDocument& doc, BufferCoord start, BufferCoord 
     // export all the lines into fBuffer
     mFirstAttribute = true;
 
+    int baseStartLine = 0;
+    if (mRecalcLineNumber)
+        baseStartLine = mLineNumberStartFromZero?start.line:start.line-1;
+    if (mExportLineNumber)
+        addData(getStartLineNumberString(start.line-baseStartLine, stop.line-baseStartLine));
     if (start.line == 1)
         mSyntaxer->resetState();
     else
         mSyntaxer->setState(doc->getSyntaxState(start.line-2));
     for (int i = start.line; i<=stop.line; i++) {
+        if (mExportLineNumber)
+            addData(getLineNumberString(i-baseStartLine));
         QString Line = doc->getLine(i-1);
         // order is important, since Start.Y might be equal to Stop.Y
 //        if (i == Stop.Line)
@@ -113,6 +124,8 @@ void Exporter::exportRange(const PDocument& doc, BufferCoord start, BufferCoord 
     }
     if (!mFirstAttribute)
         formatAfterLastAttribute();
+    if (mExportLineNumber)
+        addData(getEndLineNumberString(start.line-baseStartLine, stop.line-baseStartLine));
     // insert header
     insertData(0, getHeader());
     // add footer
@@ -131,8 +144,9 @@ void Exporter::saveToFile(const QString &filename)
 
 void Exporter::writeToStream(QIODevice &stream)
 {
-    QTextCodec *codec=getCodec();
-    if (stream.write(codec->fromUnicode(mText))<0) {
+    TextEncoder encoder = getEncoder();
+    auto [ok, encoded] = encoder.encode(mText);
+    if (ok && stream.write(encoded) < 0) {
         throw FileError(QObject::tr("Failed to write data."));
     }
 }
@@ -274,12 +288,14 @@ int Exporter::getBufferSize() const
     return mText.size();
 }
 
-QTextCodec * Exporter::getCodec() const {
-    QTextCodec* codec = QTextCodec::codecForName(mCharset);
-    if (codec == nullptr)
-        codec = QTextCodec::codecForLocale();
-    return codec;
+TextEncoder Exporter::getEncoder() const {
+    TextEncoder encoder(mCharset);
+    if (encoder.isValid())
+        return encoder;
+    else
+        return TextEncoder::encoderForSystem();
 }
+
 void Exporter::insertData(int pos, const QString &text)
 {
     if (!text.isEmpty()) {
@@ -337,15 +353,81 @@ void Exporter::setTokenAttribute(PTokenAttribute attri)
     }
 }
 
+QString Exporter::getStartLineNumberString(int startLine, int endLine)
+{
+    return QString();
+}
+
+QString Exporter::getLineNumberString(int line)
+{
+    return QString();
+}
+
+QString Exporter::getEndLineNumberString(int startLine, int endLine)
+{
+    return QString();
+}
+
 QByteArray Exporter::buffer() const
 {
-    QTextCodec* codec = getCodec();
-    return codec->fromUnicode(mText);
+    TextEncoder encoder = getEncoder();
+    auto [_, encoded] = encoder.encode(mText);
+    return encoded;
 }
 
 const QString &Exporter::text() const
 {
     return mText;
+}
+
+bool Exporter::exportLineNumber() const
+{
+    return mExportLineNumber;
+}
+
+void Exporter::setExportLineNumber(bool newExportLineNumber)
+{
+    mExportLineNumber = newExportLineNumber;
+}
+
+bool Exporter::recalcLineNumber() const
+{
+    return mRecalcLineNumber;
+}
+
+void Exporter::setRecalcLineNumber(bool newRecalcLineNumber)
+{
+    mRecalcLineNumber = newRecalcLineNumber;
+}
+
+bool Exporter::lineNumberStartFromZero() const
+{
+    return mLineNumberStartFromZero;
+}
+
+void Exporter::setLineNumberStartFromZero(bool newLineNumberStartFromZero)
+{
+    mLineNumberStartFromZero = newLineNumberStartFromZero;
+}
+
+QColor Exporter::lineNumberColor() const
+{
+    return mLineNumberColor;
+}
+
+void Exporter::setLineNumberColor(const QColor &newLineNumberColor)
+{
+    mLineNumberColor = newLineNumberColor;
+}
+
+QColor Exporter::lineNumberBackgroundColor() const
+{
+    return mLineNumberBackgroundColor;
+}
+
+void Exporter::setLineNumberBackgroundColor(const QColor &newLineNumberBackgroundColor)
+{
+    mLineNumberBackgroundColor = newLineNumberBackgroundColor;
 }
 
 QByteArray Exporter::clipboardFormat()

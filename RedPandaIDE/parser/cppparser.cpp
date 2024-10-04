@@ -4327,6 +4327,9 @@ void CppParser::handleVar(const QString& typePrefix,bool isExtern,bool isStatic,
             }
             mIndex=mTokenizer[mIndex]->matchIndex+1;
             addedVar.reset();
+            //If there are multiple var define in the same line, the next token should be ','
+            if (mIndex>=maxIndex || mTokenizer[mIndex]->text != ",")
+                return;
             break;
         default:
             if (isIdentChar(mTokenizer[mIndex]->text[0])) {
@@ -6068,8 +6071,7 @@ void CppParser::internalInvalidateFile(const QString &fileName)
     }
 
     //remove all statements from namespace cache
-    for (auto it=mNamespaces.begin();it!=mNamespaces.end();++it) {
-        QString key = it.key();
+    for (auto it=mNamespaces.begin();it!=mNamespaces.end();) {
         PStatementList statements = it.value();
         for (int i=statements->size()-1;i>=0;i--) {
             PStatement statement = statements->at(i);
@@ -6078,7 +6080,9 @@ void CppParser::internalInvalidateFile(const QString &fileName)
             }
         }
         if (statements->isEmpty()) {
-            mNamespaces.remove(key);
+            it = mNamespaces.erase(it);
+        } else {
+            ++it;
         }
     }
     // class inheritance

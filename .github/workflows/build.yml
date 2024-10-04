@@ -10,21 +10,28 @@ jobs:
       matrix:
         msystem: [MINGW32, MINGW64, UCRT64, CLANG64]
         include:
+          - isUcrt: false
           - msystem: MINGW32
             packagePrefix: mingw-w64-i686
+            _7zPackagePrefix: mingw-w64-x86_64
           - msystem: MINGW64
             packagePrefix: mingw-w64-x86_64
+            _7zPackagePrefix: mingw-w64-x86_64
           - msystem: UCRT64
+            isUcrt: true
             packagePrefix: mingw-w64-ucrt-x86_64
+            _7zPackagePrefix: mingw-w64-ucrt-x86_64
           - msystem: CLANG64
+            isUcrt: true
             packagePrefix: mingw-w64-clang-x86_64
+            _7zPackagePrefix: mingw-w64-clang-x86_64
     runs-on: windows-latest
     defaults:
       run:
         shell: msys2 {0}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -33,24 +40,36 @@ jobs:
         with:
           msystem: ${{ matrix.msystem }}
           update: true
-          install: ${{ matrix.packagePrefix }}-toolchain ${{ matrix.packagePrefix }}-qt5-static
+          install: |
+            ${{ matrix.packagePrefix }}-cc
+            ${{ matrix.packagePrefix }}-make
+            ${{ matrix.packagePrefix }}-qt5-static
+            ${{ matrix.packagePrefix }}-cmake
+            mingw-w64-i686-nsis
+            ${{ matrix._7zPackagePrefix }}-7zip
+            git
+
+      - name: Download MinGW toolchain
+        run: |
+          mkdir -p assets
+          curl -L https://github.com/redpanda-cpp/toolchain-win32-mingw-xp/releases/download/11.4.0-r0/mingw32-11.4.0-r0.7z -o assets/mingw32.7z
+          curl -L https://github.com/redpanda-cpp/toolchain-win32-mingw-xp/releases/download/11.4.0-r0/mingw64-11.4.0-r0.7z -o assets/mingw64.7z
 
       - name: Build
         run: |
-          mkdir build && pushd build
-          $MSYSTEM_PREFIX/qt5-static/bin/qmake PREFIX=$GITHUB_WORKSPACE/pkg $GITHUB_WORKSPACE/Red_Panda_CPP.pro
-          mingw32-make -j$(nproc)
-          mingw32-make install
-          popd
+          ./packages/msys/build-mingw.sh \
+            $( [[ ${{ matrix.isUcrt }} -eq 1 ]] && echo --ucrt 22621 )
+          ./packages/msys/build-mingw.sh --mingw \
+            $( [[ ${{ matrix.isUcrt }} -eq 1 ]] && echo --ucrt 22621 )
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Windows MSYS2 - msystem=${{ matrix.msystem }}
-          path: pkg/
+          path: dist/
 
-  windows_legacy:
-    name: Windows NT 5.x
+  windows_legacy_native:
+    name: Windows NT 5.x native
     strategy:
       fail-fast: false
       matrix:
@@ -59,46 +78,65 @@ jobs:
           - 32-ucrt
           - 64-msvcrt
           - 32-msvcrt
-          - 32-win2000
         include:
           - isUcrt: 0
           - profile: 64-ucrt
             isUcrt: 1
           - profile: 32-ucrt
             isUcrt: 1
-    runs-on: windows-2019
+    runs-on: windows-2022
     defaults:
       run:
         shell: msys2 {0}
-    env:
-      _REDPANDA_QT_BUILD: "5.15.13+redpanda1"
-      _QT_NAME: mingw141_${{ matrix.profile }}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
-          install: mingw-w64-x86_64-7zip mingw-w64-x86_64-cmake mingw-w64-i686-nsis curl git
-
-      - name: Setup Qt
-        run: |
-          curl -LO https://github.com/redpanda-cpp/qtbase-xp/releases/download/$_REDPANDA_QT_BUILD/$_QT_NAME.7z
-          /mingw64/bin/7z x $_QT_NAME.7z -oC:/Qt
 
       - name: Build
         run: |
-          ./packages/msys/build-xp.sh -p ${{ matrix.profile }} $( [[ ${{ matrix.isUcrt }} -eq 1 ]] && echo --ucrt 22621 )
+          ./packages/msys/build-xp.sh -p ${{ matrix.profile }} \
+            $( [[ ${{ matrix.isUcrt }} -eq 1 ]] && echo --ucrt 22621 )
+          ./packages/msys/build-xp.sh -p ${{ matrix.profile }} --mingw \
+            $( [[ ${{ matrix.isUcrt }} -eq 1 ]] && echo --ucrt 22621 )
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: Windows NT 5.x - profile=${{ matrix.profile }}
+          name: Windows NT 5.x native - profile=${{ matrix.profile }}
+          path: dist/*
+
+  windows_legacy_cross:
+    name: Windows NT 5.x cross
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - 64-msvcrt
+          - 32-msvcrt
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build
+        run: |
+          sudo ./packages/xmingw/build-xp.sh -p ${{ matrix.profile }}
+          sudo ./packages/xmingw/build-xp.sh -p ${{ matrix.profile }} --mingw
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows NT 5.x cross - profile=${{ matrix.profile }}
           path: dist/*
 
   windows_msvc_x64:
@@ -106,7 +144,7 @@ jobs:
     runs-on: windows-2019
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -135,7 +173,7 @@ jobs:
           popd
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Windows MSVC x64
           path: pkg/
@@ -145,7 +183,7 @@ jobs:
     runs-on: windows-2019
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -174,7 +212,7 @@ jobs:
           popd
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Windows MSVC ARM64EC (do not use)
           path: pkg/
@@ -192,7 +230,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -201,7 +239,7 @@ jobs:
           podman run --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/debian/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Debian ${{ matrix.version }} ${{ matrix.arch }}
           path: dist/*.deb
@@ -218,7 +256,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -227,7 +265,7 @@ jobs:
           podman run --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/debian/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Ubuntu ${{ matrix.version }} amd64
           path: dist/*.deb
@@ -239,7 +277,7 @@ jobs:
       IMAGE: docker.io/amd64/archlinux:latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -248,7 +286,7 @@ jobs:
           podman run --security-opt seccomp=unconfined --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/archlinux/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Arch Linux
           path: dist/*.pkg.tar.zst
@@ -264,7 +302,7 @@ jobs:
       IMAGE: docker.io/amd64/fedora:${{ matrix.version }}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -273,7 +311,7 @@ jobs:
           podman run --security-opt seccomp=unconfined --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/fedora/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Fedora ${{ matrix.version }} x86_64
           path: dist/*.rpm
@@ -289,7 +327,7 @@ jobs:
       IMAGE: docker.io/opensuse/${{ matrix.edition }}:latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -298,7 +336,7 @@ jobs:
           podman run --security-opt seccomp=unconfined --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/opensuse/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: openSUSE ${{ matrix.edition }} x86_64
           path: dist/*.rpm
@@ -310,7 +348,7 @@ jobs:
       IMAGE: docker.io/amd64/alpine:latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -319,7 +357,7 @@ jobs:
           podman run --security-opt seccomp=unconfined --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/alpine/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: musl-based Linux (latest Alpine)
           path: dist/*.apk
@@ -328,10 +366,10 @@ jobs:
     name: Linux AppImage
     runs-on: ubuntu-latest
     env:
-      IMAGE: quay.io/redpanda-cpp/appimage-builder-x86_64:20240304.0
+      IMAGE: quay.io/redpanda-cpp/appimage-builder-x86_64:20240610.0
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -340,7 +378,7 @@ jobs:
           podman run --rm -v $PWD:/mnt -w /mnt $IMAGE ./packages/appimage/01-in-docker.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Linux AppImage
           path: dist/*.AppImage
@@ -350,7 +388,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -359,7 +397,7 @@ jobs:
           packages/debian-static/builddeb.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: Static Deb
           path: dist/*.deb
@@ -369,7 +407,7 @@ jobs:
     runs-on: macos-12
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -396,7 +434,7 @@ jobs:
           tar -cJf RedPandaIDE.tar.xz RedPandaIDE.app
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: macOS x86_64
           path: pkg/bin/RedPandaIDE.tar.xz

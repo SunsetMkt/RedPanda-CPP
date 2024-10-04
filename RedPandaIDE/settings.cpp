@@ -16,7 +16,6 @@
  */
 #include "settings.h"
 #include <QApplication>
-#include <QTextCodec>
 #include <algorithm>
 #include "utils.h"
 #include "utils/escape.h"
@@ -804,6 +803,26 @@ void Settings::Editor::setForceFixedFontWidth(bool newForceFixedWidth)
     mForceFixedFontWidth = newForceFixedWidth;
 }
 
+bool Settings::Editor::copyHTMLRecalcLineNumber() const
+{
+    return mCopyHTMLRecalcLineNumber;
+}
+
+void Settings::Editor::setCopyHTMLRecalcLineNumber(bool newCopyHTMLRecalcLineNumber)
+{
+    mCopyHTMLRecalcLineNumber = newCopyHTMLRecalcLineNumber;
+}
+
+bool Settings::Editor::copyHTMLWithLineNumber() const
+{
+    return mCopyHTMLWithLineNumber;
+}
+
+void Settings::Editor::setCopyHTMLWithLineNumber(bool newCopyHTMLWithLineNumber)
+{
+    mCopyHTMLWithLineNumber = newCopyHTMLWithLineNumber;
+}
+
 bool Settings::Editor::showTrailingSpaces() const
 {
     return mShowTrailingSpaces;
@@ -1320,6 +1339,9 @@ void Settings::Editor::doSave()
     saveValue("copy_rtf_color_scheme",mCopyRTFColorScheme);
     saveValue("copy_html_use_background",mCopyHTMLUseBackground);
     saveValue("copy_html_use_editor_color_scheme",mCopyHTMLUseEditorColor);
+    saveValue("copy_html_with_line_number",mCopyHTMLWithLineNumber);
+    saveValue("copy_html_recalc_line_number",mCopyHTMLRecalcLineNumber);
+
     saveValue("copy_html_color_scheme", mCopyHTMLColorScheme);
 
     //color scheme
@@ -1472,6 +1494,9 @@ void Settings::Editor::doLoad()
     mCopyRTFColorScheme = stringValue("copy_rtf_color_scheme","Intellij Classic");
     mCopyHTMLUseBackground = boolValue("copy_html_use_background",false);
     mCopyHTMLUseEditorColor = boolValue("copy_html_use_editor_color_scheme",false);
+    mCopyHTMLWithLineNumber = boolValue("copy_html_with_line_number", false);
+    mCopyHTMLRecalcLineNumber = boolValue("copy_html_recalc_line_number", true);
+
     mCopyHTMLColorScheme = stringValue("copy_html_color_scheme","Intellij Classic");
 
     //color
@@ -1691,7 +1716,6 @@ Settings::CompilerSet::CompilerSet(const Settings::CompilerSet &set):
 
     mDumpMachine{set.mDumpMachine},
     mVersion{set.mVersion},
-    mType{set.mType},
     mName{set.mName},
     mTarget{set.mTarget},
     mCompilerType{set.mCompilerType},
@@ -1736,7 +1760,6 @@ Settings::CompilerSet::CompilerSet(const QJsonObject &set) :
 
     mDumpMachine{set["dumpMachine"].toString()},
     mVersion{set["version"].toString()},
-    mType{set["type"].toString()},
     mName{set["name"].toString()},
     mTarget{set["target"].toString()},
     mCompilerType{}, // handle later
@@ -2135,16 +2158,6 @@ void Settings::CompilerSet::setVersion(const QString &value)
     mVersion = value;
 }
 
-const QString &Settings::CompilerSet::type() const
-{
-    return mType;
-}
-
-void Settings::CompilerSet::setType(const QString& value)
-{
-    mType = value;
-}
-
 const QString &Settings::CompilerSet::name() const
 {
     return mName;
@@ -2255,101 +2268,63 @@ void Settings::CompilerSet::setGCCProperties(const QString& binDir, const QStrin
     // We have tested before the call
 //    if (!fileExists(c_prog))
 //        return;
-    // Obtain version number and compiler distro etc
-    QStringList arguments;
-    arguments.append("-v");
-    QByteArray output = getCompilerOutput(binDir, c_prog,arguments);
 
-    //Target
-    QByteArray targetStr = "Target: ";
-    int delimPos1 = output.indexOf(targetStr);
-    if (delimPos1<0)
-        return; // unknown binary
-    delimPos1+=strlen(targetStr);
-    int delimPos2 = delimPos1;
-    while (delimPos2<output.length() && !isNonPrintableAsciiChar(output[delimPos2]))
-        delimPos2++;
-    QString triplet = output.mid(delimPos1,delimPos2-delimPos1);
+    // Obtain basic info
+    QByteArray dumpMachine = getCompilerOutput(binDir, c_prog, {"-dumpmachine"});
+    mDumpMachine = QString(dumpMachine).trimmed();
+    if (mDumpMachine.isEmpty())
+        // unknown binary
+        return;
+    if (mDumpMachine == "mingw32") {
+        // MinGW.org uses bare `mingw32` “triplet”, not conforming to GCC's document.
+        // here we change it to MinGW-w64’s compatibility mode triplet.
+        // ref 1. https://gcc.gnu.org/install/specific.html
+        // ref 2. https://sourceforge.net/p/mingw-w64/wiki2/Feature%20list/
+        mDumpMachine = "i386-pc-mingw32";
+    }
+    mTarget = mDumpMachine.mid(0, mDumpMachine.indexOf('-'));
+    QByteArray version = getCompilerOutput(binDir, c_prog, {"-dumpversion"});
+    mVersion = QString(version).trimmed();
 
-    int tripletDelimPos1 = triplet.indexOf('-');
-    mTarget = triplet.mid(0, tripletDelimPos1);
-
-    //Find version number
-    targetStr = "clang version ";
-    delimPos1 = output.indexOf(targetStr);
-    if (delimPos1>=0) {
+    // Obtain compiler distro
+    QByteArray verboseOut = getCompilerOutput(binDir, c_prog, {"-v"});
+    QByteArray targetStr = "clang version ";
+    int clangVersionPos = verboseOut.indexOf(targetStr);
+    if (clangVersionPos >= 0) {
         mCompilerType = CompilerType::Clang;
-        delimPos1+=strlen(targetStr);
-        delimPos2 = delimPos1;
-        while (delimPos2<output.length() && !isNonPrintableAsciiChar(output[delimPos2]))
-            delimPos2++;
-        mVersion = output.mid(delimPos1,delimPos2-delimPos1);
-
-        mName = "Clang " + mVersion;
+        QRegularExpression ntPosixPattern = QRegularExpression("^(.*)-pc-windows-msys$");
+        QRegularExpression mingwW64Pattern = QRegularExpression("^(.*)-w64-windows-gnu$");
+        if (mName.isEmpty()) {
+            if (auto m = ntPosixPattern.match(mDumpMachine); m.hasMatch()) {
+                mName = "MSYS2 Clang " + mVersion;
+            } else if (m = mingwW64Pattern.match(mDumpMachine); m.hasMatch()) {
+                mName = "MinGW-w64 Clang " + mVersion;
+            } else {
+                mName = "Clang " + mVersion;
+            }
+        }
     } else {
         mCompilerType = CompilerType::GCC;
-        targetStr = "gcc version ";
-        delimPos1 = output.indexOf(targetStr);
-        if (delimPos1<0)
-            return; // unknown binary
-        delimPos1+=strlen(targetStr);
-        delimPos2 = delimPos1;
-        while (delimPos2<output.length() && !isNonPrintableAsciiChar(output[delimPos2]))
-            delimPos2++;
-        mVersion = output.mid(delimPos1,delimPos2-delimPos1);
-
-        int majorVersion;
-        if (mVersion.indexOf('.')>0) {
-            bool ok;
-            majorVersion=mVersion.left(mVersion.indexOf('.')).toInt(&ok);
-            if (!ok)
-                majorVersion=-1;
-        } else {
-            bool ok;
-            majorVersion=mVersion.toInt(&ok);
-            if (!ok)
-                majorVersion=-1;
-        }
-//        //fix for mingw64 gcc
-//        double versionValue;
-//        bool ok;
-//        versionValue = mVersion.toDouble(&ok);
-//        if (ok && versionValue>=12) {
-//            mCompilerType=COMPILER_GCC_UTF8;
-//        }
-
-        // Find compiler builder
-        delimPos1 = delimPos2;
-        while ((delimPos1 < output.length()) && !(output[delimPos1] == '('))
-            delimPos1++;
-        while ((delimPos2 < output.length()) && !(output[delimPos2] == ')'))
-            delimPos2++;
-        mType = output.mid(delimPos1 + 1, delimPos2 - delimPos1 - 1);
-
-        if (majorVersion>=12 && mType.contains("MSYS2"))
+        QRegularExpression ntPosixPattern = QRegularExpression("^(.*)-(.*)-(msys|cygwin)$");
+        QRegularExpression mingwW64Pattern = QRegularExpression("^(.*)-w64-mingw32$");
+        QRegularExpression mingwOrgPattern("^(.*)-(.*)-mingw32$");
+        if (auto m = ntPosixPattern.match(mDumpMachine); m.hasMatch()) {
             mCompilerType = CompilerType::GCC_UTF8;
+            if (mName.isEmpty()) {
+                if (m.capturedTexts()[3] == "msys")
+                    mName = "MSYS2 GCC " + mVersion;
+                else
+                    mName = "Cygwin GCC " + mVersion;
+            }
+        }
         // Assemble user friendly name if we don't have one yet
-        if (mName == "") {
-            if (mType.contains("tdm64",Qt::CaseInsensitive)) {
-                mName = "TDM-GCC " + mVersion;
-            } else if (mType.contains("tdm",Qt::CaseInsensitive)) {
-                mName = "TDM-GCC " + mVersion;
-            } else if (mType.contains("MSYS2",Qt::CaseInsensitive)) {
+        if (mName.isEmpty()) {
+            if (auto m = mingwW64Pattern.match(mDumpMachine); m.hasMatch()) {
                 mName = "MinGW-w64 GCC " + mVersion;
-            } else if (mType.contains("MinGW-W64",Qt::CaseInsensitive)) {
-                mName = "MinGW-w64 GCC " + mVersion;
-            } else if (mType.contains("GCC",Qt::CaseInsensitive)) {
-#ifdef Q_OS_WIN
-                mName = "MinGW GCC " + mVersion;
-#else
-                mName = "GCC " + mVersion;
-#endif
+            } else if (m = mingwOrgPattern.match(mDumpMachine); m.hasMatch()) {
+                mName = "MinGW.org GCC " + mVersion;
             } else {
-#ifdef Q_OS_WIN
-                mName = "MinGW-w64 GCC " + mVersion;
-#else
                 mName = "GCC " + mVersion;
-#endif
             }
         }
     }
@@ -2358,11 +2333,6 @@ void Settings::CompilerSet::setGCCProperties(const QString& binDir, const QStrin
     QDir tmpDir(binDir);
     tmpDir.cdUp();
     QString folder = tmpDir.path();
-
-    // Obtain compiler target
-    arguments.clear();
-    arguments.append("-dumpmachine");
-    mDumpMachine = getCompilerOutput(binDir, c_prog, arguments);
 
     // Add the default directories
     addExistingDirectory(mBinDirs, includeTrailingPathDelimiter(folder) +  "bin");
@@ -2408,6 +2378,50 @@ void Settings::CompilerSet::setSDCCProperties(const QString& binDir, const QStri
     addExistingDirectory(mBinDirs, binDir);
 }
 #endif
+
+QStringList Settings::CompilerSet::x86MultilibList(const QString &folder, const QString &c_prog) const
+{
+    QByteArray multilibOutput = getCompilerOutput(folder, c_prog, {"-print-multi-lib"});
+    QStringList result;
+    for (QByteArray rawLine : multilibOutput.split('\n')) {
+        // man gcc:
+        //   -print-multi-lib
+        //     Print the mapping from multilib directory names to compiler switches that enable them.
+        //     The directory name is separated from the switches by `;`, and each switch starts with
+        //     an `@` instead of the `-`, without spaces between multiple switches.
+
+        // Example 1 (GCC):
+        //   .;
+        //   32;@m32
+
+        // Example 2 (GCC Debian):
+        //   .;
+        //   32;@m32
+        //   x32;@mx32
+
+        // Example 3 (Clang):
+        //   .;@m64
+        //   32;@m32
+
+        QString line = QString(rawLine).trimmed();
+        int sep = line.indexOf(';');
+        if (sep < 0)
+            continue;
+        QString dir = line.left(sep);
+        if (dir == ".")
+            // native ABI
+            continue;
+        QString switches = line.mid(sep+1);
+        if (switches == "@m32")
+            result.append("32");
+        else if (switches == "@mx32")
+            result.append("x32");
+        else if (switches == "@m64")
+            // possible for Debian x32 port
+            result.append("64");
+    }
+    return result;
+}
 
 QStringList Settings::CompilerSet::defines(bool isCpp) {
     // get default defines
@@ -2843,7 +2857,7 @@ void Settings::CompilerSet::setIniOptions(const QByteArray &value)
    }
 }
 
-QByteArray Settings::CompilerSet::getCompilerOutput(const QString &binDir, const QString &binFile, const QStringList &arguments)
+QByteArray Settings::CompilerSet::getCompilerOutput(const QString &binDir, const QString &binFile, const QStringList &arguments) const
 {
     QProcessEnvironment env;
     env.insert("LANG","en");
@@ -2920,6 +2934,7 @@ bool Settings::CompilerSet::isOutputExecutable(CompilationStage stage)
     return stage == CompilationStage::GenerateExecutable;
 }
 
+#ifdef Q_OS_WINDOWS
 bool Settings::CompilerSet::isDebugInfoUsingUTF8() const
 {
     switch(mCompilerType) {
@@ -2927,30 +2942,10 @@ bool Settings::CompilerSet::isDebugInfoUsingUTF8() const
     case CompilerType::GCC_UTF8:
         return true;
     case CompilerType::GCC:
-#ifdef Q_OS_WIN
-        if (mainVersion()>=13) {
-            bool isOk;
-            int productVersion = QSysInfo::productVersion().toInt(&isOk);
-        //    qDebug()<<productVersion<<isOk;
-            if (!isOk) {
-                if (QSysInfo::productVersion().startsWith("7"))
-                    productVersion=7;
-                else if (QSysInfo::productVersion().startsWith("10"))
-                    productVersion=10;
-                else if (QSysInfo::productVersion().startsWith("11"))
-                    productVersion=11;
-                else
-                    productVersion=10;
-            }
-            return productVersion>=10;
-        }
-#else
-        break;
-#endif
+        return applicationIsUtf8(mCCompiler);
     default:
-        break;
+        return false;
     }
-    return false;
 }
 
 bool Settings::CompilerSet::forceUTF8() const
@@ -2962,6 +2957,7 @@ bool Settings::CompilerSet::isCompilerInfoUsingUTF8() const
 {
     return isDebugInfoUsingUTF8();
 }
+#endif
 
 const QString &Settings::CompilerSet::assemblingSuffix() const
 {
@@ -3090,8 +3086,8 @@ Settings::PCompilerSet Settings::CompilerSets::addSet(const QJsonObject &set)
     return p;
 }
 
-static void set64_32Options(Settings::PCompilerSet pSet) {
-    pSet->setCompileOption(CC_CMD_OPT_POINTER_SIZE,"32");
+static void setX86MultilibOptions(Settings::PCompilerSet pSet, const QString &value) {
+    pSet->setCompileOption(CC_CMD_OPT_POINTER_SIZE, value);
 }
 
 static void setReleaseOptions(Settings::PCompilerSet pSet) {
@@ -3140,21 +3136,25 @@ bool Settings::CompilerSets::addSets(const QString &folder, const QString& c_pro
         QString baseName = baseSet->name();
         QString platformName;
         if (isTarget64Bit(baseSet->target())) {
-            if (baseName.startsWith("TDM-GCC ")) {
-                PCompilerSet set= addSet(baseSet);
-                platformName = "32-bit";
-                set->setName(baseName + " " + platformName + " Release");
-                set64_32Options(set);
-                setReleaseOptions(set);
-
-                set = addSet(baseSet);
-                set->setName(baseName + " " + platformName + " Debug");
-                set64_32Options(set);
-                setDebugOptions(set);
-            }
             platformName = "64-bit";
         } else {
             platformName = "32-bit";
+        }
+
+        // handling x86 multilib
+        if (baseSet->target() == "x86_64") {
+            auto multilibs = baseSet->x86MultilibList(folder, c_prog);
+            for (const QString &value : multilibs) {
+                PCompilerSet set= addSet(baseSet);
+                set->setName(baseName + " multilib " + value + " Release");
+                setX86MultilibOptions(set, value);
+                setReleaseOptions(set);
+
+                set = addSet(baseSet);
+                set->setName(baseName + " multilib " + value + " Debug");
+                setX86MultilibOptions(set, value);
+                setDebugOptions(set);
+            }
         }
 
 
@@ -3543,7 +3543,6 @@ void Settings::CompilerSets::saveSet(int index)
     // Misc. properties
     mSettings->mSettings.setValue("DumpMachine", pSet->dumpMachine());
     mSettings->mSettings.setValue("Version", pSet->version());
-    mSettings->mSettings.setValue("Type", pSet->type());
     mSettings->mSettings.setValue("Name", pSet->name());
     mSettings->mSettings.setValue("Target", pSet->target());
     mSettings->mSettings.setValue("CompilerType", (int)pSet->compilerType());
@@ -3596,7 +3595,6 @@ Settings::PCompilerSet Settings::CompilerSets::loadSet(int index)
 
     pSet->setDumpMachine(mSettings->mSettings.value("DumpMachine").toString());
     pSet->setVersion(mSettings->mSettings.value("Version").toString());
-    pSet->setType(mSettings->mSettings.value("Type").toString());
     pSet->setName(mSettings->mSettings.value("Name").toString());
     pSet->setTarget(mSettings->mSettings.value("Target").toString());
     //compatibility
@@ -3882,7 +3880,7 @@ QString Settings::Environment::AStylePath() const
 {
     QString path = mAStylePath;
     if (path.isEmpty())
-        path = includeTrailingPathDelimiter(pSettings->dirs().appLibexecDir())+"astyle";
+        path = includeTrailingPathDelimiter(pSettings->dirs().appLibexecDir())+ASTYLE_PROGRAM;
     else
         path = replacePrefix(path, "%*APP_DIR*%", pSettings->dirs().appDir());
     return path;
